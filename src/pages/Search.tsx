@@ -9,7 +9,7 @@ export default function Search() {
   const results = useLiveQuery(async () => {
     const t = q.trim().toLowerCase()
     if (t.length < 2) return []
-    return db.cards.filter(c => c.name.toLowerCase().includes(t) && (!rarity || c.rarity === rarity)).limit(40).toArray()
+    return db.cards.filter(c => c.name.toLowerCase().includes(t) && (!rarity || c.rarity?.toLowerCase() === rarity)).limit(40).toArray()
   }, [q, rarity])
   return (
     <div className="space-y-3">

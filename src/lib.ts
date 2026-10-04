@@ -2,48 +2,54 @@ import Dexie, { type Table } from 'dexie'
 import { createWorker, type Worker } from 'tesseract.js'
 
 export interface Card {
-  id: string; name: string; oracle_name: string; type: string; energy: number | null
-  set: string; set_name: string; collector_number: string; rarity: string; variant: string | null
-  images: { full: string; thumb: string }; prices: unknown
+  id: string; riftboundId: string; name: string; cleanName: string; num: number
+  energy: number | null; type: string; rarity: string; set: string; setName: string
+  imgUrl: string; tcgId: string; alt: boolean
 }
+export interface Finish { low: number | null; mid: number | null; high: number | null; market: number | null }
+export interface PriceRow { riftboundId: string; purchaseUri: string; updatedAt: string; finishes: Record<string, Finish> }
+
 class AppDB extends Dexie {
   cards!: Table<Card, string>
+  prices!: Table<PriceRow, string>
   kv!: Table<{ k: string; v: number }, string>
   favs!: Table<{ id: string }, string>
   history!: Table<{ n?: number; id: string; ts: number }, number>
   constructor() {
     super('scancard')
-    this.version(1).stores({ cards: 'id, oracle_name, set', kv: 'k', favs: 'id', history: '++n, id, ts' })
+    this.version(2).stores({ cards: 'id, name, set', prices: 'riftboundId', kv: 'k', favs: 'id', history: '++n, id, ts' })
   }
 }
 export const db = new AppDB()
 
 const API = 'https://api.rifthunt.com'
 
-/** Descarga el catálogo completo (~1,2 MB) como máximo una vez al día. */
-export async function ensureCatalog(): Promise<void> {
-  const at = await db.kv.get('catalogAt')
-  if (at && Date.now() - at.v < 864e5 && (await db.cards.count())) return
-  const r = await fetch(`${API}/bulk/cards`)
-  if (!r.ok) throw new Error('No se pudo descargar el catálogo')
-const j = await r.json()
-const list = (Array.isArray(j) ? j : j.data ?? j.cards ?? Object.values(j).find(Array.isArray)) as Card[]
-if (!Array.isArray(list)) throw new Error('Formato inesperado: ' + Object.keys(j).join(', '))
-  await db.transaction('rw', db.cards, db.kv, async () => {
-    await db.cards.clear(); await db.cards.bulkPut(list)
-    await db.kv.put({ k: 'catalogAt', v: Date.now() })
+async function refresh<T>(key: string, path: string, pick: (j: any) => T[], table: Table<T, string>) {
+  const at = await db.kv.get(key)
+  if (at && Date.now() - at.v < 864e5 && (await table.count())) return
+  const r = await fetch(API + path)
+  if (!r.ok) throw new Error(`${path} respondió ${r.status}`)
+  const list = pick(await r.json())
+  if (!Array.isArray(list)) throw new Error('Formato inesperado en ' + path)
+  await db.transaction('rw', table, db.kv, async () => {
+    await table.clear(); await table.bulkPut(list)
+    await db.kv.put({ k: key, v: Date.now() })
   })
 }
 
-/** Extrae precios USD por acabado. Tolera varias formas del objeto `prices` (ver README). */
-export function usdPrices(c: Card): { finish: string; usd: number }[] {
-  const p = c.prices as Record<string, unknown> | null
-  if (!p) return []
-  const f = (p.finishes ?? p) as Record<string, any>
-  return Object.entries(f)
-    .map(([finish, x]) => ({ finish, usd: Number(x?.market ?? x?.marketPrice ?? x) }))
-    .filter(o => Number.isFinite(o.usd) && o.usd > 0)
+export async function ensureCatalog(): Promise<void> {
+  await refresh('catalogAt', '/bulk/cards', j => (Array.isArray(j) ? j : j.cards ?? j.data), db.cards)
+  try { await refresh('pricesAt', '/bulk/prices', j => (Array.isArray(j) ? j : j.prices), db.prices) }
+  catch (e) { console.warn('Precios no disponibles', e) } // la app funciona sin precios
 }
+
+/** Acabados con precio de mercado, normal primero. */
+export function finishList(p: PriceRow): [string, Finish][] {
+  return Object.entries(p.finishes ?? {})
+    .filter(([, f]) => f?.market != null)
+    .sort(([a], [b]) => (a === 'normal' ? -1 : b === 'normal' ? 1 : 0))
+}
+export const money = (n: number | null | undefined) => (n == null ? '—' : `$${n.toFixed(2)}`)
 
 let worker: Worker | null = null
 export async function readText(canvas: HTMLCanvasElement): Promise<string> {
@@ -51,18 +57,17 @@ export async function readText(canvas: HTMLCanvasElement): Promise<string> {
   return (await worker.recognize(canvas)).data.text
 }
 
-/** Puntúa candidatos: código de colección (p. ej. OGN-045) y nombre. */
+/** Busca por código impreso (OGN-001 → ogn-001-…) y por nombre. */
 export async function findCandidates(text: string): Promise<Card[]> {
   const t = text.toUpperCase()
   const m = t.match(/\b([A-Z]{3})\s*[-–]?\s*(\d{3})/)
+  const key = m ? `${m[1].toLowerCase()}-${m[2]}` : ''
   const all = await db.cards.toArray()
   return all
     .map(c => {
       let s = 0
-      const set = (c.set ?? '').toLowerCase()
-      const num = c.collector_number ?? ''
-      const name = (c.oracle_name ?? c.name ?? '').toUpperCase()
-      if (m && set === m[1].toLowerCase() && num.startsWith(m[2])) s += 5
+      if (key && c.riftboundId?.startsWith(key)) s += 5
+      const name = (c.cleanName ?? c.name ?? '').toUpperCase()
       if (name.length > 3 && t.includes(name)) s += 3
       return { c, s }
     })
