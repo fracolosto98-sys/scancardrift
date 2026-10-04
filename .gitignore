@@ -1,0 +1,3 @@
+git branch -M mainnode_modules
+dist
+.env
