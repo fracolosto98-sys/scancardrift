@@ -1,38 +1,61 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { findCandidates, readText, type Card } from '../lib'
 import CardRow from './CardRow'
 
-type Status = 'idle' | 'working' | 'done' | 'denied' | 'nocam'
+type Status = 'scanning' | 'found' | 'denied' | 'nocam'
 
 export default function Scan() {
   const video = useRef<HTMLVideoElement>(null)
-  const [status, setStatus] = useState<Status>('idle')
+  const nav = useNavigate()
+  const [status, setStatus] = useState<Status>('scanning')
   const [found, setFound] = useState<Card[]>([])
 
+  // La cámara se abre una sola vez al entrar.
   useEffect(() => {
     let stream: MediaStream | undefined
-    navigator.mediaDevices?.getUserMedia({ video: { facingMode: 'environment' }, audio: false })
-      .then(s => { stream = s; if (video.current) video.current.srcObject = s })
+    let stopped = false
+    if (!navigator.mediaDevices?.getUserMedia) { setStatus('nocam'); return }
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false })
+      .then(s => {
+        if (stopped) { s.getTracks().forEach(t => t.stop()); return }
+        stream = s
+        if (video.current) video.current.srcObject = s
+      })
       .catch(e => setStatus(e?.name === 'NotAllowedError' ? 'denied' : 'nocam'))
-    return () => stream?.getTracks().forEach(t => t.stop())
+    return () => { stopped = true; stream?.getTracks().forEach(t => t.stop()) }
   }, [])
 
-  async function capture() {
-    const v = video.current
-    if (!v || !v.videoWidth) return
-    setStatus('working')
-    // Recorta la zona del marco guía (centro, proporción de carta 5:7).
-    const h = v.videoHeight * 0.8, w = h * 5 / 7
-    const c = document.createElement('canvas')
-    c.width = w * 1.5; c.height = h * 1.5
-    c.getContext('2d')!.drawImage(v, (v.videoWidth - w) / 2, (v.videoHeight - h) / 2, w, h, 0, 0, c.width, c.height)
-    setFound(await findCandidates(await readText(c)))
-    setStatus('done')
-  }
+  // Bucle de reconocimiento mientras el estado sea "scanning".
+  useEffect(() => {
+    if (status !== 'scanning') return
+    let stopped = false
+    let last = ''
+    const tick = async () => {
+      const v = video.current
+      if (v?.videoWidth) {
+        const h = v.videoHeight * 0.8, w = (h * 5) / 7
+        const c = document.createElement('canvas')
+        c.width = w * 1.5; c.height = h * 1.5
+        c.getContext('2d')!.drawImage(v, (v.videoWidth - w) / 2, (v.videoHeight - h) / 2, w, h, 0, 0, c.width, c.height)
+        const cands = await findCandidates(await readText(c))
+        if (stopped) return
+        const key = cands.map(x => x.id).join()
+        if (cands.length && key === last) { // misma lectura dos veces seguidas
+          if (cands.length === 1) nav(`/carta/${cands[0].id}`, { replace: true })
+          else { setFound(cands); setStatus('found') }
+          return
+        }
+        last = key
+      }
+      if (!stopped) setTimeout(tick, 400)
+    }
+    tick()
+    return () => { stopped = true }
+  }, [status, nav])
 
-  if (status === 'denied') return <Msg text="Necesitamos permiso para usar la cámara. Actívalo en los ajustes del navegador y vuelve a intentarlo." />
-  if (status === 'nocam') return <Msg text="No hemos encontrado una cámara disponible en este dispositivo." />
+  if (status === 'denied') return <Msg text="Necesitamos permiso para usar la cámara. Actívalo en los ajustes del navegador y vuelve a abrir esta pestaña." />
+  if (status === 'nocam') return <Msg text="No hemos encontrado una cámara disponible (la cámara solo funciona con HTTPS)." />
 
   return (
     <div className="space-y-3">
@@ -40,16 +63,16 @@ export default function Scan() {
         <video ref={video} autoPlay playsInline muted className="w-full h-full object-cover" />
         <div className="absolute inset-0 m-auto h-[80%] aspect-[5/7] rounded-2xl border-4 border-[var(--teal)]" />
       </div>
-      <p className="text-sm muted text-center">Encaja la carta en el marco, con buena luz, y pulsa Capturar.</p>
-      <button className="btn" onClick={capture} disabled={status === 'working'}>
-        {status === 'working' ? 'Analizando carta…' : 'Capturar'}
-      </button>
-      {status === 'done' && (found.length ? (
-        <><h2 className="font-semibold">¿Es alguna de estas?</h2>{found.map(c => <CardRow key={c.id} card={c} />)}</>
+      {status === 'scanning' ? (
+        <p className="text-sm muted text-center animate-pulse">Coloca la carta dentro del marco, con buena luz…</p>
       ) : (
-        <div className="card p-4 space-y-2"><p>No hemos podido identificar la carta.</p>
-          <Link to="/buscar" className="btn btn-ghost block text-center">Buscar manualmente</Link></div>
-      ))}
+        <>
+          <h2 className="font-semibold">¿Es alguna de estas?</h2>
+          {found.map(c => <CardRow key={c.id} card={c} />)}
+          <button className="btn" onClick={() => setStatus('scanning')}>Escanear de nuevo</button>
+        </>
+      )}
+      <Link to="/buscar" className="btn btn-ghost block text-center">Buscar manualmente</Link>
     </div>
   )
 }

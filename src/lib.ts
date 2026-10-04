@@ -4,7 +4,7 @@ import { createWorker, type Worker } from 'tesseract.js'
 export interface Card {
   id: string; riftboundId: string; name: string; cleanName: string; num: number
   energy: number | null; type: string; rarity: string; set: string; setName: string
-  imgUrl: string; tcgId: string; alt: boolean
+  imgUrl: string; tcgId: string; alt: boolean; domains: string[]; 
 }
 export interface Finish { low: number | null; mid: number | null; high: number | null; market: number | null }
 export interface PriceRow { riftboundId: string; purchaseUri: string; updatedAt: string; finishes: Record<string, Finish> }
@@ -50,6 +50,7 @@ export function finishList(p: PriceRow): [string, Finish][] {
     .sort(([a], [b]) => (a === 'normal' ? -1 : b === 'normal' ? 1 : 0))
 }
 export const money = (n: number | null | undefined) => (n == null ? '—' : `$${n.toFixed(2)}`)
+export const cardPrice = (p: PriceRow): number | null => finishList(p)[0]?.[1].market ?? null
 
 let worker: Worker | null = null
 export async function readText(canvas: HTMLCanvasElement): Promise<string> {
