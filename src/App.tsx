@@ -6,8 +6,9 @@ import Scan from './pages/Scan'
 import Search from './pages/Search'
 import CardPage from './pages/CardPage'
 import Favorites from './pages/Favorites'
+import Decks, { DeckPage } from './pages/Decks'
 
-const tabs = [['/', 'Inicio'], ['/buscar', 'Buscar'], ['/escanear', 'Escanear'], ['/favoritos', 'Favoritos']]
+const tabs = [['/', 'Inicio'], ['/buscar', 'Buscar'], ['/escanear', 'Escanear'], ['/mazos', 'Mazos'], ['/favoritos', 'Favoritos']]
 
 export default function App() {
   const [state, setState] = useState<'loading' | 'ok' | 'error'>('loading')
@@ -35,10 +36,12 @@ export default function App() {
         <Route path="/buscar" element={<Search />} />
         <Route path="/favoritos" element={<Favorites />} />
         <Route path="/carta/:id" element={<CardPage />} />
+        <Route path="/mazos" element={<Decks />} />
+        <Route path="/mazos/:id" element={<DeckPage />} />
       </Routes></main>
       <nav className="card fixed bottom-3 left-1/2 -translate-x-1/2 w-[calc(100%-1.5rem)] max-w-md flex justify-around p-2 text-sm">
         {tabs.map(([to, label]) => (
-          <NavLink key={to} to={to} className={({ isActive }) => `px-3 py-2 rounded-xl ${isActive ? 'bg-[var(--rift)] text-white' : 'muted'}`}>{label}</NavLink>
+          <NavLink key={to} to={to} className={({ isActive }) => `px-2 py-2 rounded-xl ${isActive ? 'bg-[var(--rift)] text-white' : 'muted'}`}>{label}</NavLink>
         ))}
       </nav>
     </div>
