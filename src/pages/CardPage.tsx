@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { addToDeck, db, cardmarketUrl, finishList, getRate, money } from '../lib'
+import { addToDeck, db, cardmarketUrl, cardmarketSearchUrl, finishList, getRate, money } from '../lib'
 
 export default function CardPage() {
   const { id = '' } = useParams()
@@ -47,8 +47,21 @@ export default function CardPage() {
             <p className="text-sm muted">Mín. {money(sel[1].low)} · Medio {money(sel[1].mid)} · Máx. {money(sel[1].high)}</p>
           </>
         ) : <p className="muted">Esta carta no tiene precio disponible ahora mismo.</p>}
-        <a href={cardmarketUrl(card, sel?.[0] === 'foil')} target="_blank" rel="noopener noreferrer" className="btn btn-ghost block text-center"> Ver en Cardmarket{sel?.[0] === 'foil' ? ' (foil)' : ''} ↗ </a>
-        {price && <p className="text-xs muted">
+            <a
+                href={cardmarketUrl(card, sel?.[0] === 'foil')}
+                target="_blank" rel="noopener noreferrer"
+                className="btn btn-ghost block text-center"
+              >
+                Ver en Cardmarket{sel?.[0] === 'foil' ? ' (foil)' : ''} ↗
+              </a>
+              <a
+                href={cardmarketSearchUrl(card, sel?.[0] === 'foil')}
+                target="_blank" rel="noopener noreferrer"
+                className="block text-center text-xs muted underline"
+              >
+                ¿No es esta carta? Buscar en Cardmarket
+              </a>
+       {price && <p className="text-xs muted">
           Precio de TCGplayer (USD){getRate() ? `, convertido con el tipo del BCE (1 USD = ${getRate()!.toFixed(4)} €)` : ''}. Actualizado: {new Date(price.updatedAt).toLocaleString('es-ES')}. Orientativo.
         </p>}
       </div>

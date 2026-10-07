@@ -160,9 +160,25 @@ export function thumbUrl(url: string, w = 200): string {
     : url
 }
 
-/** Enlace de búsqueda en Cardmarket. El parámetro isFoil se intenta pero no está verificado. */
-export function cardmarketUrl(c: Card, foil: boolean): string {
+const CM = 'https://www.cardmarket.com/es/Riftbound/Products'
+// Solo sets cuyo nombre en Cardmarket he visto confirmado (Origins) o es el mismo que en nuestro catálogo.
+const CM_SETS: Record<string, string> = { OGN: 'Origins', SFD: 'Spiritforged', UNL: 'Unleashed', VEN: 'Vendetta' }
+
+/** "Rek'Sai, Void Burrower" → "ReksSai-Void-Burrower": sin acentos ni signos, espacios a guiones. */
+const cmSlug = (s: string) =>
+  s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9\s-]/g, '').trim().replace(/\s+/g, '-')
+
+export function cardmarketSearchUrl(c: Card, foil: boolean): string {
   const q = new URLSearchParams({ searchString: baseName(c) })
   if (foil) q.set('isFoil', 'Y')
-  return `https://www.cardmarket.com/es/Riftbound/Products/Search?${q}`
+  return `${CM}/Search?${q}`
+}
+
+/** Ficha directa si la carta es "normal" y su set está soportado; si no, búsqueda. */
+export function cardmarketUrl(c: Card, foil: boolean): string {
+  const set = CM_SETS[c.set]
+  const num = c.riftboundId.split('-')[1] ?? ''
+  const direct = set && !c.alt && /^\d+$/.test(num) && !/[()]/.test(c.name) && zoneOf(c) !== 'runes'
+  if (!direct) return cardmarketSearchUrl(c, foil)
+  return `${CM}/Singles/${set}/${cmSlug(c.name)}${foil ? '?isFoil=Y' : ''}`
 }
