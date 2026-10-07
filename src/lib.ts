@@ -55,18 +55,32 @@ export async function ensureCatalog(): Promise<void> {
 let usdEur: number | null = null
 export const getRate = () => usdEur
 
+const RATE_SOURCES: [string, (j: any) => unknown][] = [
+  ['https://api.frankfurter.dev/v1/latest?base=USD&symbols=EUR', j => j?.rates?.EUR],
+  ['https://api.frankfurter.app/latest?from=USD&to=EUR', j => j?.rates?.EUR],
+  // Tercera opción, no verificada por mí: solo se usa si las dos anteriores fallan.
+  ['https://open.er-api.com/v6/latest/USD', j => j?.rates?.EUR],
+]
+
 export async function ensureRate(): Promise<void> {
   const [rate, at] = await Promise.all([db.kv.get('fxRate'), db.kv.get('fxAt')])
   usdEur = rate?.v ?? null
   if (rate && at && Date.now() - at.v < 864e5) return
-  try {
-    const r = await fetch('https://api.frankfurter.app/latest?base=USD&symbols=EUR')
-    const eur = (await r.json())?.rates?.EUR
-    if (typeof eur === 'number') {
-      usdEur = eur
-      await db.kv.bulkPut([{ k: 'fxRate', v: eur }, { k: 'fxAt', v: Date.now() }])
+  for (const [url, pick] of RATE_SOURCES) {
+    try {
+      const r = await fetch(url)
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      const eur = pick(await r.json())
+      if (typeof eur === 'number' && eur > 0) {
+        usdEur = eur
+        await db.kv.bulkPut([{ k: 'fxRate', v: eur }, { k: 'fxAt', v: Date.now() }])
+        return
+      }
+      throw new Error('Respuesta sin tipo EUR')
+    } catch (e) {
+      console.warn('Tipo de cambio: falló', url, e)
     }
-  } catch { /* se usa la última tasa guardada, si existe */ }
+  }
 }
 
 const eurFmt = new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' })
