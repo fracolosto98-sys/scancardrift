@@ -159,3 +159,10 @@ export function thumbUrl(url: string, w = 200): string {
     ? `${url}${url.includes('?') ? '&' : '?'}w=${w}&fm=webp&q=70`
     : url
 }
+
+/** Enlace de búsqueda en Cardmarket. El parámetro isFoil se intenta pero no está verificado. */
+export function cardmarketUrl(c: Card, foil: boolean): string {
+  const q = new URLSearchParams({ searchString: baseName(c) })
+  if (foil) q.set('isFoil', 'Y')
+  return `https://www.cardmarket.com/es/Riftbound/Products/Search?${q}`
+}
