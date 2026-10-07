@@ -152,3 +152,10 @@ export async function addToDeck(deckId: number, card: Card): Promise<string | nu
   await db.deckCards.put({ deckId, cardId: card.id, qty: (cur?.qty ?? 0) + 1 })
   return null
 }
+
+/** Versión reducida de la imagen si el CDN lo permite; si no, la original. */
+export function thumbUrl(url: string, w = 200): string {
+  return url.includes('cmsassets.rgpub.io')
+    ? `${url}${url.includes('?') ? '&' : '?'}w=${w}&fm=webp&q=70`
+    : url
+}

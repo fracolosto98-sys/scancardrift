@@ -31,7 +31,7 @@ export default function Search() {
   const [domain, setDomain] = useState('')
   const [onlyPriced, setOnlyPriced] = useState(false)
   const [sort, setSort] = useState<Sort>('price-desc')
-  const [limit, setLimit] = useState(60)
+  const [limit, setLimit] = useState(30)
 
   const cards = useLiveQuery(() => db.cards.toArray(), [])
   const prices = useLiveQuery(
@@ -66,7 +66,7 @@ export default function Search() {
 
   return (
     <div className="space-y-3">
-      <input value={q} onChange={e => { setQ(e.target.value); setLimit(60) }} placeholder="Buscar carta, p. ej. Jinx"
+      <input value={q} onChange={e => { setQ(e.target.value); setLimit(30) }} placeholder="Buscar carta, p. ej. Jinx"
         aria-label="Buscar carta" className="card w-full p-4 outline-none" />
       <div className="grid grid-cols-2 gap-2">
         <Sel value={set} onChange={setSet} label="Colección" options={sets} />
@@ -83,7 +83,7 @@ export default function Search() {
       <p className="text-sm muted">{results.length} cartas</p>
       {cards && results.length === 0 && <p className="muted">Sin resultados. Prueba a quitar algún filtro.</p>}
       {results.slice(0, limit).map(c => <CardRow key={c.id} card={c} />)}
-      {results.length > limit && <button className="btn btn-ghost" onClick={() => setLimit(limit + 60)}>Mostrar más</button>}
+      {results.length > limit && <button className="btn btn-ghost" onClick={() => setLimit(limit + 30)}>Mostrar más</button>}
     </div>
   )
 }
