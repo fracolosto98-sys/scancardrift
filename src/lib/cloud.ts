@@ -69,13 +69,17 @@ export function initCloud() {
   if (started) return
   started = true
   getKv<number>('syncAt').then(t => setState({ lastSync: t ?? null }))
-  const fromEmail = /[?&](code|error_description)=/.test(location.search)
-  if (localStorage.getItem(STORAGE_KEY) || fromEmail) {
+  const fromRedirect = /[?&](code|error_description)=/.test(location.search)
+  if (localStorage.getItem(STORAGE_KEY) || fromRedirect) {
     client().then(async sb => {
       await sb.auth.getSession() // espera a que se canjee el código del enlace
       const err = new URLSearchParams(location.search).get('error_description')
       if (err) setState({ error: err })
-      if (fromEmail) history.replaceState(null, '', location.pathname + location.hash)
+      // Al volver del email o de Google: limpiar la URL y regresar a Ajustes, donde se inició el acceso.
+      if (fromRedirect) {
+        history.replaceState(null, '', location.pathname + location.hash)
+        if (location.hash.length <= 2) location.replace('#/ajustes')
+      }
     }).catch(e => setState({ status: 'error', error: message(e) }))
   }
   // Cualquier cambio local se sube a los pocos segundos; al volver a la app o recuperar conexión, se descarga lo nuevo.
@@ -95,6 +99,23 @@ function message(e: unknown): string {
   if (/error sending/i.test(m?.message ?? '')) return 'No se pudo enviar el email de acceso. Inténtalo más tarde.' // fallo del correo de Supabase, no del usuario
   if (e instanceof TypeError) return 'Sin conexión con el servidor.'
   return m?.message ?? String(e)
+}
+
+let providersP: Promise<{ google: boolean; email: boolean }> | null = null
+/** Métodos de acceso activados en Supabase (sin cargar el cliente): así los botones aparecen solos al activarlos. */
+export function loginProviders() {
+  providersP ??= fetch(`${SUPABASE_URL}/auth/v1/settings`, { headers: { apikey: SUPABASE_KEY } })
+    .then(r => r.json())
+    .then(j => ({ google: !!j?.external?.google, email: !!j?.external?.email }))
+    .catch(() => { providersP = null; return { google: false, email: true } })
+  return providersP
+}
+
+/** Lleva a la pantalla de Google; al volver, initCloud recoge la sesión. */
+export async function signInWithGoogle() {
+  const sb = await client()
+  const { error } = await sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.origin + location.pathname } })
+  if (error) throw new Error(message(error))
 }
 
 /** Envía un email con un enlace y un código para entrar (sin contraseña). */
