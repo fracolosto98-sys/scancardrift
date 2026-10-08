@@ -1,74 +1,110 @@
-import { useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useCallback, useMemo, useState } from 'react'
+import { Link, useNavigate, useParams } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { addToDeck, baseName, cardPrice, db, money, zoneOf, type Card, type Zone } from '../lib'
+import {
+  addToDeck, baseName, cardPrice, db, deckToText, offIdentity, parseDeckText, removeFromDeck, validateDeck, zoneOf,
+  type Card, type DeckCard, type DeckItem, type Zone,
+} from '../lib'
+import { useCatalog, useToast } from '../state'
+import { CardImg } from '../components/CardRow'
+import { DomainChip, Stepper } from '../components/bits'
+import Icon from '../components/Icon'
 
-async function load(id: number) {
-  const rows = await db.deckCards.where('deckId').equals(id).toArray()
-  const cards = await db.cards.bulkGet(rows.map(r => r.cardId))
-  const prices = await db.prices.bulkGet(cards.map(c => c?.riftboundId ?? ''))
-  const items = rows.flatMap((r, i) => cards[i] ? [{ qty: r.qty, card: cards[i]!, price: prices[i] ? cardPrice(prices[i]!) : null }] : [])
-  const by = (z: Zone) => items.filter(x => zoneOf(x.card) === z).sort((a, b) => a.card.name.localeCompare(b.card.name))
-  const n = (z: Zone) => by(z).reduce((s, x) => s + x.qty, 0)
-  return {
-    legend: by('legend')[0]?.card, main: by('main'), runes: by('runes'), bf: by('battlefields'),
-    counts: { main: n('main'), runes: n('runes'), bf: n('battlefields') },
-    total: items.reduce((s, x) => s + x.qty * (x.price ?? 0), 0),
-    unpriced: items.filter(x => x.price == null).length,
-  }
+/** Agrupa las filas de un mazo con sus cartas y calcula el resumen. */
+function useSummary() {
+  const { byId, priceOf } = useCatalog()
+  return useCallback((rows: DeckCard[]) => {
+    const items: DeckItem[] = rows.flatMap(r => byId.get(r.cardId) ? [{ qty: r.qty, card: byId.get(r.cardId)! }] : [])
+    const by = (z: Zone) => items.filter(x => zoneOf(x.card) === z).sort((a, b) => a.card.name.localeCompare(b.card.name))
+    const n = (z: Zone) => by(z).reduce((s, x) => s + x.qty, 0)
+    const price = (c: Card) => cardPrice(priceOf(c))
+    const checks = validateDeck(items)
+    return {
+      items, legend: by('legend')[0]?.card, main: by('main'), runes: by('runes'), bf: by('battlefields'),
+      counts: { main: n('main'), runes: n('runes'), bf: n('battlefields') },
+      total: items.reduce((s, x) => s + x.qty * (price(x.card) ?? 0), 0),
+      unpriced: items.filter(x => price(x.card) == null).length,
+      checks, valid: checks.every(c => c.ok),
+    }
+  }, [byId, priceOf])
 }
 
 export default function Decks() {
   const nav = useNavigate()
+  const toast = useToast()
+  const { cards, money } = useCatalog()
+  const summary = useSummary()
   const [name, setName] = useState('')
-  const decks = useLiveQuery(async () => Promise.all((await db.decks.toArray()).map(async d => ({ d, s: await load(d.id!) }))), [])
+  const [importing, setImporting] = useState(false)
+  const [text, setText] = useState('')
+  const decks = useLiveQuery(async () => (await db.decks.toArray()).sort((a, b) => b.createdAt - a.createdAt), [])
+  const rows = useLiveQuery(() => db.deckCards.toArray(), [])
+  const list = useMemo(() => decks?.map(d => ({ d, s: summary(rows?.filter(r => r.deckId === d.id) ?? []) })), [decks, rows, summary])
+
   async function create() {
     const n = name.trim(); if (!n) return
     const id = await db.decks.add({ name: n, createdAt: Date.now() }); setName(''); nav(`/mazos/${id}`)
   }
+  async function importDeck() {
+    const { found, missing } = parseDeckText(text, cards)
+    if (!found.length) return toast('No se ha reconocido ninguna carta.')
+    const title = text.match(/^#\s*(.+)$/m)?.[1]?.trim() || 'Mazo importado'
+    const id = await db.transaction('rw', db.decks, db.deckCards, async () => {
+      const id = await db.decks.add({ name: title, createdAt: Date.now() })
+      await db.deckCards.bulkPut(found.map(f => ({ deckId: id, cardId: f.card.id, qty: f.qty })))
+      return id
+    })
+    setText(''); setImporting(false)
+    toast(missing.length ? `Importado. No se reconocieron ${missing.length} líneas: ${missing.slice(0, 3).join(' · ')}` : 'Mazo importado')
+    nav(`/mazos/${id}`)
+  }
+
   return (
     <div className="space-y-3">
       <h1 className="text-2xl font-bold pt-2">Mazos</h1>
-      <div className="flex gap-2">
-        <input value={name} onChange={e => setName(e.target.value)} placeholder="Nombre del mazo" aria-label="Nombre del mazo" className="card flex-1 p-3 outline-none" />
-        <button className="btn !w-auto" onClick={create}>Crear</button>
-      </div>
-      {decks?.length === 0 && <p className="muted">Crea tu primer mazo, elige una Leyenda y ve añadiendo cartas desde su ficha.</p>}
-      {decks?.map(({ d, s }) => (
+      <form className="flex gap-2" onSubmit={e => { e.preventDefault(); create() }}>
+        <input value={name} onChange={e => setName(e.target.value)} placeholder="Nombre del mazo" aria-label="Nombre del mazo" className="field flex-1" />
+        <button className="btn !w-auto" disabled={!name.trim()}>Crear</button>
+      </form>
+      <button className="text-sm muted underline" aria-expanded={importing} onClick={() => setImporting(!importing)}>Importar desde texto</button>
+      {importing && (
+        <div className="card p-3 space-y-2">
+          <textarea value={text} onChange={e => setText(e.target.value)} rows={8} className="field font-mono text-xs"
+            placeholder={'# Mi mazo\n1 Jinx, Loose Cannon\n3 Jinx, Demolitionist\n6 Fury Rune\n…'} aria-label="Lista del mazo" />
+          <button className="btn" onClick={importDeck} disabled={!text.trim()}>Importar</button>
+        </div>
+      )}
+      {list?.length === 0 && <p className="muted">Crea tu primer mazo, elige una Leyenda y ve añadiendo cartas desde su ficha.</p>}
+      {list?.map(({ d, s }) => (
         <Link key={d.id} to={`/mazos/${d.id}`} className="card flex items-center gap-3 p-3">
-          {s.legend ? <img src={s.legend.imgUrl} alt="" className="w-14 rounded-lg" /> : <div className="w-14 h-20 rounded-lg bg-black/10" />}
+          {s.legend ? <CardImg card={s.legend} className="w-14 rounded-lg" /> : <div className="w-14 aspect-[5/7] rounded-lg bg-black/10" />}
           <div className="flex-1 min-w-0">
             <p className="font-semibold truncate">{d.name}</p>
-            <p className="text-sm muted">{s.legend?.name ?? 'Sin leyenda'} · {s.counts.main}/40 cartas</p>
+            <p className="text-sm muted truncate">{s.legend ? baseName(s.legend) : 'Sin leyenda'} · {s.counts.main}/40</p>
+            <p className={`text-xs ${s.valid ? 'teal' : 'muted'}`}>{s.valid ? '✓ Válido' : `${s.checks.filter(c => !c.ok).length} pendientes`}</p>
           </div>
-          <b style={{ color: 'var(--gold)' }}>{money(s.total)}</b>
+          <b className="gold">{money(s.total)}</b>
         </Link>
       ))}
     </div>
   )
 }
 
-type Item = { qty: number; card: Card; price: number | null }
-
-function Zone({ title, items, need, count, legend, onChange }: {
-  title: string; items: Item[]; need: number; count: number; legend?: Card; onChange: (c: Card, d: 1 | -1) => void
+function ZoneGrid({ title, items, need, count, legend, onChange }: {
+  title: string; items: DeckItem[]; need: number; count: number; legend?: Card; onChange: (c: Card, d: 1 | -1) => void
 }) {
   return (
     <section className="space-y-2">
-      <h2 className="font-semibold">{title} <span className={count === need ? 'text-[var(--teal)]' : 'muted'}>{count}/{need}</span></h2>
+      <h2 className="font-semibold">{title} <span className={count === need || (need === 40 && count > 40) ? 'teal' : 'muted'}>{count}/{need}</span></h2>
       {items.length === 0 && <p className="text-sm muted">Vacío.</p>}
       <div className="grid grid-cols-3 gap-2">
         {items.map(({ qty, card }) => {
-          const off = legend && card.domains?.some(d => !legend.domains?.includes(d))
+          const off = offIdentity(legend, card)
           return (
             <div key={card.id} className="card p-1 text-center">
-              <Link to={`/carta/${card.id}`}><img src={card.imgUrl} alt={baseName(card)} loading="lazy" className="rounded-lg w-full" /></Link>
-              <p className="text-xs truncate mt-1">{off && '⚠️ '}{baseName(card)}</p>
-              <div className="flex items-center justify-between text-sm px-1">
-                <button aria-label="Quitar una" onClick={() => onChange(card, -1)} className="px-2">−</button>
-                <b>{qty}</b>
-                <button aria-label="Añadir una" onClick={() => onChange(card, 1)} className="px-2">+</button>
-              </div>
+              <Link to={`/carta/${card.id}`}><CardImg card={card} w={400} className="rounded-lg w-full" /></Link>
+              <p className="text-xs truncate mt-1" title={off ? 'Fuera de los dominios de la leyenda' : undefined}>{off && '⚠️ '}{baseName(card)}</p>
+              <div className="flex justify-center"><Stepper label={baseName(card)} value={qty} onChange={d => onChange(card, d)} /></div>
             </div>
           )
         })}
@@ -79,19 +115,35 @@ function Zone({ title, items, need, count, legend, onChange }: {
 
 export function DeckPage() {
   const nav = useNavigate()
+  const toast = useToast()
+  const { cards, byId, priceOf, money } = useCatalog()
+  const summary = useSummary()
   const id = Number(useParams().id)
-  const deck = useLiveQuery(() => db.decks.get(id), [id])
-  const s = useLiveQuery(() => load(id), [id])
-  const [msg, setMsg] = useState('')
+  const deck = useLiveQuery(async () => (Number.isInteger(id) ? (await db.decks.get(id)) ?? null : null), [id])
+  const rows = useLiveQuery(() => (Number.isInteger(id) ? db.deckCards.where('deckId').equals(id).toArray() : []), [id])
+  const owned = useLiveQuery(() => db.collection.toArray(), [])
+  const s = useMemo(() => rows && summary(rows), [rows, summary])
+
+  // Coste para completarlo: copias que faltan en la colección (vale cualquier impresión del mismo nombre),
+  // a la impresión más barata de cada nombre.
+  const missing = useMemo(() => {
+    if (!s || !owned) return null
+    const have = new Map<string, number>(), cheapest = new Map<string, number>()
+    owned.forEach(o => { const c = byId.get(o.cardId); if (c) have.set(baseName(c), (have.get(baseName(c)) ?? 0) + o.qty) })
+    cards.forEach(c => { const p = cardPrice(priceOf(c)); if (p != null && p < (cheapest.get(baseName(c)) ?? Infinity)) cheapest.set(baseName(c), p) })
+    const need = new Map<string, number>()
+    s.items.forEach(x => need.set(baseName(x.card), (need.get(baseName(x.card)) ?? 0) + x.qty))
+    let copies = 0, cost = 0
+    need.forEach((q, n) => { const m = Math.max(0, q - (have.get(n) ?? 0)); copies += m; cost += m * (cheapest.get(n) ?? 0) })
+    return { copies, cost }
+  }, [s, owned, cards, byId, priceOf])
+
+  if (deck === null) return <div className="card p-4 space-y-3"><p>Este mazo no existe.</p><Link to="/mazos" className="btn">Ver mis mazos</Link></div>
   if (!deck || !s) return <p className="muted">Cargando…</p>
 
-  const ok = !!s.legend && s.counts.main >= 40 && s.counts.runes === 12 && s.counts.bf === 3
   async function change(c: Card, d: 1 | -1) {
-    setMsg('')
-    if (d === 1) return setMsg((await addToDeck(id, c)) ?? '')
-    const cur = await db.deckCards.get([id, c.id])
-    if (cur && cur.qty > 1) await db.deckCards.put({ ...cur, qty: cur.qty - 1 })
-    else await db.deckCards.delete([id, c.id])
+    if (d === 1) { const err = await addToDeck(id, c); if (err) toast(err) }
+    else await removeFromDeck(id, c.id)
   }
   async function remove() {
     if (!confirm(`¿Eliminar el mazo «${deck!.name}»?`)) return
@@ -100,31 +152,65 @@ export function DeckPage() {
     })
     nav('/mazos')
   }
+  async function duplicate() {
+    const copy = await db.transaction('rw', db.decks, db.deckCards, async () => {
+      const nid = await db.decks.add({ name: `${deck!.name} (copia)`, createdAt: Date.now() })
+      await db.deckCards.bulkPut(rows!.map(r => ({ ...r, deckId: nid })))
+      return nid
+    })
+    nav(`/mazos/${copy}`)
+  }
+  async function share() {
+    const text = deckToText(deck!.name, s!.items)
+    try {
+      if (navigator.share) await navigator.share({ title: deck!.name, text })
+      else { await navigator.clipboard.writeText(text); toast('Lista copiada al portapapeles') }
+    } catch (e) {
+      if ((e as Error)?.name !== 'AbortError') { await navigator.clipboard?.writeText(text).catch(() => {}); toast('Lista copiada al portapapeles') }
+    }
+  }
+
   return (
     <div className="space-y-4">
-      <div className="flex justify-between items-center pt-2">
+      <div className="flex justify-between items-center pt-2 gap-2">
         <h1 className="text-2xl font-bold truncate">{deck.name}</h1>
-        <button className="text-sm muted underline" onClick={() => { const n = prompt('Nuevo nombre', deck.name)?.trim(); if (n) db.decks.update(id, { name: n }) }}>Renombrar</button>
+        <button className="text-sm muted underline shrink-0" onClick={() => { const n = prompt('Nuevo nombre', deck.name)?.trim(); if (n) db.decks.update(id, { name: n }) }}>Renombrar</button>
       </div>
       <div className="card p-4 flex gap-3 items-center">
-        {s.legend ? <img src={s.legend.imgUrl} alt={s.legend.name} className="w-20 rounded-lg" /> : <div className="w-20 h-28 rounded-lg bg-black/10" />}
-        <div className="flex-1">
+        {s.legend ? <Link to={`/carta/${s.legend.id}`} className="w-20 shrink-0"><CardImg card={s.legend} w={400} className="w-full rounded-lg" /></Link>
+          : <div className="w-20 aspect-[5/7] rounded-lg bg-black/10" />}
+        <div className="flex-1 min-w-0 space-y-1">
           <p className="font-semibold">{s.legend?.name ?? 'Sin leyenda'}</p>
-          <p className="text-sm muted">{s.legend?.domains?.join(' · ') ?? 'Guarda una carta de tipo Legend en este mazo'}</p>
-          <p className="text-2xl font-bold mt-1" style={{ color: 'var(--gold)' }}>{money(s.total)}</p>
+          {s.legend ? <div className="flex gap-1 flex-wrap">{s.legend.domains?.map(d => <DomainChip key={d} d={d} />)}</div>
+            : <p className="text-sm muted">Añade una carta de tipo Leyenda desde su ficha.</p>}
+          <p className="text-2xl font-bold gold">{money(s.total)}</p>
           {s.unpriced > 0 && <p className="text-xs muted">{s.unpriced} carta(s) sin precio no suman.</p>}
+          {missing && s.items.length > 0 && (missing.copies
+            ? <p className="text-xs muted">Te faltan {missing.copies} cartas de tu colección (≈ {money(missing.cost)}).</p>
+            : <p className="text-xs teal">Tienes todas las cartas en tu colección.</p>)}
         </div>
       </div>
-      <p role="status" className={`text-sm ${ok ? 'text-[var(--teal)]' : 'muted'}`}>
-        {ok ? '✅ Mazo completo y válido' : 'Pendiente: leyenda, 40+ cartas, 12 runas y 3 campos de batalla distintos.'}
-      </p>
-      {msg && <p role="alert" className="text-sm text-[var(--gold)]">{msg}</p>}
-      <Link to="/buscar" className="btn btn-ghost block text-center">Buscar cartas para añadir</Link>
-      <Zone title="Mazo principal" items={s.main} need={40} count={s.counts.main} legend={s.legend} onChange={change} />
-      <Zone title="Runas" items={s.runes} need={12} count={s.counts.runes} legend={s.legend} onChange={change} />
-      <Zone title="Campos de batalla" items={s.bf} need={3} count={s.counts.bf} onChange={change} />
-      <p className="text-xs muted">⚠️ = la carta tiene un dominio que no pertenece a la identidad de la leyenda.</p>
-      <button className="btn btn-ghost" onClick={remove}>Eliminar mazo</button>
+
+      <details className="card p-4" open={!s.valid && s.items.length > 0}>
+        <summary className={`font-semibold cursor-pointer ${s.valid ? 'teal' : ''}`}>
+          {s.valid ? '✓ Mazo completo y válido' : `Reglas del mazo: ${s.checks.filter(c => !c.ok).length} pendientes`}
+        </summary>
+        <ul className="mt-2 space-y-1 text-sm">
+          {s.checks.map(c => <li key={c.label} className={c.ok ? 'teal' : 'muted'}>{c.ok ? '✓' : '○'} {c.label}</li>)}
+        </ul>
+      </details>
+
+      <Link to="/buscar" className="btn btn-ghost">Buscar cartas para añadir</Link>
+      <ZoneGrid title="Mazo principal" items={s.main} need={40} count={s.counts.main} legend={s.legend} onChange={change} />
+      <ZoneGrid title="Runas" items={s.runes} need={12} count={s.counts.runes} legend={s.legend} onChange={change} />
+      <ZoneGrid title="Campos de batalla" items={s.bf} need={3} count={s.counts.bf} onChange={change} />
+      {s.legend && <p className="text-xs muted">⚠️ = la carta tiene un dominio que no pertenece a la identidad de la leyenda.</p>}
+
+      <div className="grid grid-cols-2 gap-2">
+        <button className="btn btn-ghost" onClick={share} disabled={!s.items.length}><Icon name="share" />Compartir lista</button>
+        <button className="btn btn-ghost" onClick={duplicate}>Duplicar</button>
+      </div>
+      <button className="btn btn-ghost text-[#e5484d]" onClick={remove}>Eliminar mazo</button>
     </div>
   )
 }
