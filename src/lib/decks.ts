@@ -8,10 +8,10 @@ export const offIdentity = (legend: Card | undefined, c: Card) =>
   !!legend && c.domains?.some(d => d !== 'Colorless' && !legend.domains?.includes(d))
 
 /** Añade una copia respetando las reglas de construcción. Devuelve un mensaje si no se puede. */
-export async function addToDeck(deckId: number, card: Card): Promise<string | null> {
+export async function addToDeck(deckId: string, card: Card): Promise<string | null> {
   if (isToken(card)) return 'Las fichas no se incluyen en el mazo.'
-  return db.transaction('rw', db.deckCards, db.cards, async () => {
-    const rows = await db.deckCards.where('deckId').equals(deckId).toArray()
+  return db.transaction('rw', db.deckSlots, db.cards, async () => {
+    const rows = await db.deckSlots.where('deckId').equals(deckId).toArray()
     const cards = await db.cards.bulkGet(rows.map(r => r.cardId))
     const z = zoneOf(card)
     const inZone = rows.map((r, i) => ({ r, c: cards[i] })).filter(x => x.c && zoneOf(x.c) === z)
@@ -19,24 +19,40 @@ export async function addToDeck(deckId: number, card: Card): Promise<string | nu
     const same = inZone.filter(x => baseName(x.c!) === baseName(card)).reduce((s, x) => s + x.r.qty, 0)
 
     if (z === 'legend') {
-      await db.deckCards.bulkDelete(inZone.map(x => [deckId, x.r.cardId] as [number, string]))
-      await db.deckCards.put({ deckId, cardId: card.id, qty: 1 })
+      await db.deckSlots.bulkDelete(inZone.map(x => [deckId, x.r.cardId] as [string, string]))
+      await db.deckSlots.put({ deckId, cardId: card.id, qty: 1 })
       return null
     }
     if (z === 'runes' && total >= 12) return 'El mazo de runas ya tiene 12.'
     if (z === 'battlefields' && same >= 1) return 'Los campos de batalla deben ser distintos.'
     if (z === 'battlefields' && total >= 3) return 'Ya tienes 3 campos de batalla.'
     if (z === 'main' && same >= 3) return 'Máximo 3 copias del mismo nombre.'
-    const cur = await db.deckCards.get([deckId, card.id])
-    await db.deckCards.put({ deckId, cardId: card.id, qty: (cur?.qty ?? 0) + 1 })
+    const cur = await db.deckSlots.get([deckId, card.id])
+    await db.deckSlots.put({ deckId, cardId: card.id, qty: (cur?.qty ?? 0) + 1 })
     return null
   })
 }
 
-export async function removeFromDeck(deckId: number, cardId: string) {
-  const cur = await db.deckCards.get([deckId, cardId])
-  if (cur && cur.qty > 1) await db.deckCards.put({ ...cur, qty: cur.qty - 1 })
-  else await db.deckCards.delete([deckId, cardId])
+/** Crea un mazo (opcionalmente con cartas) y devuelve su id. */
+export async function createDeck(name: string, slots: { cardId: string; qty: number }[] = []): Promise<string> {
+  const id = crypto.randomUUID()
+  await db.transaction('rw', db.deckList, db.deckSlots, async () => {
+    await db.deckList.add({ id, name, createdAt: Date.now() })
+    await db.deckSlots.bulkPut(slots.map(s => ({ deckId: id, cardId: s.cardId, qty: s.qty })))
+  })
+  return id
+}
+
+export async function deleteDeck(id: string) {
+  await db.transaction('rw', db.deckList, db.deckSlots, async () => {
+    await db.deckSlots.where('deckId').equals(id).delete(); await db.deckList.delete(id)
+  })
+}
+
+export async function removeFromDeck(deckId: string, cardId: string) {
+  const cur = await db.deckSlots.get([deckId, cardId])
+  if (cur && cur.qty > 1) await db.deckSlots.put({ ...cur, qty: cur.qty - 1 })
+  else await db.deckSlots.delete([deckId, cardId])
 }
 
 export interface Check { ok: boolean; label: string }

@@ -21,11 +21,16 @@ export async function addHistory(id: string) {
 }
 
 // ---------- Copia de seguridad ----------
-const USER_TABLES = ['favs', 'collection', 'decks', 'deckCards', 'history', 'priceHist'] as const
+/** Nombre en el archivo de copia → tabla local (los mazos cambiaron de tabla al pasar a ids UUID). */
+const BACKUP_TABLES = {
+  favs: 'favs', collection: 'collection', decks: 'deckList', deckCards: 'deckSlots', history: 'history', priceHist: 'priceHist',
+} as const
+type BackupKey = keyof typeof BACKUP_TABLES
+const KEYS = Object.keys(BACKUP_TABLES) as BackupKey[]
 
 export async function exportBackup(): Promise<Blob> {
-  const data: Record<string, unknown> = { app: 'foilio', version: 1, exportedAt: new Date().toISOString() }
-  for (const t of USER_TABLES) data[t] = await db.table(t).toArray()
+  const data: Record<string, unknown> = { app: 'foilio', version: 2, exportedAt: new Date().toISOString() }
+  for (const k of KEYS) data[k] = await db.table(BACKUP_TABLES[k]).toArray()
   return new Blob([JSON.stringify(data)], { type: 'application/json' })
 }
 
@@ -33,12 +38,21 @@ export async function exportBackup(): Promise<Blob> {
 export async function importBackup(file: File): Promise<void> {
   let data: any
   try { data = JSON.parse(await file.text()) } catch { throw new Error('El archivo no es una copia válida.') }
-  if (data?.app !== 'foilio' || !USER_TABLES.every(t => data[t] === undefined || Array.isArray(data[t])))
+  if (data?.app !== 'foilio' || !KEYS.every(k => data[k] === undefined || Array.isArray(data[k])))
     throw new Error('El archivo no es una copia de Foilio.')
-  await db.transaction('rw', USER_TABLES.map(t => db.table(t)), async () => {
-    for (const t of USER_TABLES) {
-      await db.table(t).clear()
-      if (data[t]?.length) await db.table(t).bulkPut(data[t])
+  // Copias de la versión 1: los mazos tenían ids numéricos.
+  const ids = new Map<unknown, string>()
+  data.decks = data.decks?.map((d: any) => {
+    if (typeof d.id === 'string') return d
+    ids.set(d.id, crypto.randomUUID())
+    return { ...d, id: ids.get(d.id) }
+  })
+  data.deckCards = data.deckCards?.flatMap((r: any) =>
+    typeof r.deckId === 'string' ? [r] : ids.has(r.deckId) ? [{ ...r, deckId: ids.get(r.deckId) }] : [])
+  await db.transaction('rw', KEYS.map(k => db.table(BACKUP_TABLES[k])), async () => {
+    for (const k of KEYS) {
+      await db.table(BACKUP_TABLES[k]).clear()
+      if (data[k]?.length) await db.table(BACKUP_TABLES[k]).bulkPut(data[k])
     }
   })
 }

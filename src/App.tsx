@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigationType } from 'react-router'
 import { hasCatalog, syncAll } from './lib'
+import { initCloud } from './lib/cloud'
 import { CatalogProvider, useToast } from './state'
 import Icon, { type IconName } from './components/Icon'
 import { ErrorBoundary } from './components/bits'
@@ -30,6 +31,7 @@ export default function App() {
   }
 
   useEffect(() => {
+    initCloud()
     // Con catálogo guardado la app abre al instante (también sin conexión) y actualiza en segundo plano.
     hasCatalog().then(has => {
       if (!has) return start()

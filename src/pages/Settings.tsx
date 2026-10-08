@@ -3,6 +3,8 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { db, download, exportBackup, importBackup, setKv, syncAll, type Currency } from '../lib'
 import { useCatalog, useToast } from '../state'
 import { Segmented } from '../components/bits'
+import Account from '../components/Account'
+import { HAS_AFFILIATES, MONEY } from '../config'
 
 const when = (ts: unknown) => typeof ts === 'number' ? new Date(ts).toLocaleString('es-ES', { dateStyle: 'medium', timeStyle: 'short' }) : 'nunca'
 
@@ -37,6 +39,8 @@ export default function Settings() {
     <div className="space-y-4">
       <h1 className="text-2xl font-bold pt-2">Ajustes</h1>
 
+      <Account />
+
       <section className="card p-4 space-y-3">
         <h2 className="font-semibold">Moneda</h2>
         <Segmented<Currency> label="Moneda" value={currency} onChange={v => setKv('currency', v)} options={[['EUR', 'Euros (€)'], ['USD', 'Dólares ($)']]} />
@@ -60,15 +64,24 @@ export default function Settings() {
 
       <section className="card p-4 space-y-2">
         <h2 className="font-semibold">Copia de seguridad</h2>
-        <p className="text-sm muted">Tus datos solo se guardan en este dispositivo. Exporta una copia para no perderlos o pasarlos a otro móvil.</p>
+        <p className="text-sm muted">Sin cuenta, tus datos solo se guardan en este dispositivo. Exporta una copia para no perderlos o pasarlos a otro móvil.</p>
         <button className="btn btn-ghost" onClick={backup}>Exportar copia</button>
         <button className="btn btn-ghost" onClick={() => file.current?.click()}>Restaurar copia…</button>
         <input ref={file} type="file" accept="application/json,.json" hidden onChange={e => restore(e.target.files?.[0])} />
         <button className="text-sm muted underline" onClick={clearHistory}>Borrar historial de consultas</button>
       </section>
 
+      {MONEY.supportUrl && (
+        <section className="card p-4 space-y-2">
+          <h2 className="font-semibold">Apoya Foilio</h2>
+          <p className="text-sm muted">Foilio es gratis y sin anuncios. Si te resulta útil, puedes ayudar a mantenerla.</p>
+          <a className="btn" href={MONEY.supportUrl} target="_blank" rel="noopener noreferrer">Invítame a un café ☕</a>
+        </section>
+      )}
+
       <section className="text-xs muted space-y-1">
         <p>Datos de cartas y precios: <a className="underline" href="https://rifthunt.com" target="_blank" rel="noopener noreferrer">RiftHunt</a> (precios de TCGplayer). Tipo de cambio: Banco Central Europeo vía Frankfurter.</p>
+        {HAS_AFFILIATES && <p>Algunos enlaces a tiendas son de afiliado: si compras a través de ellos, Foilio recibe una pequeña comisión sin coste para ti.</p>}
         <p>Foilio no está afiliada a Riot Games. Riftbound es una marca de Riot Games.</p>
       </section>
     </div>

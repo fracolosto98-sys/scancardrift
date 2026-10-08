@@ -1,9 +1,10 @@
 import { useMemo } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { collectorNo, db, download, es, finishPrice } from '../lib'
+import { amazonUrl, collectorNo, db, download, es, finishPrice } from '../lib'
 import { useCards, useCatalog } from '../state'
 import CardRow from '../components/CardRow'
+import { MONEY } from '../config'
 import { Segmented } from '../components/bits'
 
 type View = 'coleccion' | 'favoritos'
@@ -75,6 +76,7 @@ function Owned({ sort, setSort }: { sort: Sort; setSort: (s: Sort) => void }) {
           sub={<>{r.qty} × {es(r.finish)}{r.unit != null && ` · ${money(r.unit)} c/u`}</>}
           right={<p className="font-semibold gold">{money(r.value)}</p>} />
       ))}
+      <Accessories value={total} />
     </>
   )
 }
@@ -85,4 +87,29 @@ function Favorites() {
   if (!cards) return null
   if (!cards.length) return <p className="muted">Todavía no tienes favoritos. Abre una carta y pulsa la estrella.</p>
   return <>{cards.map(c => <CardRow key={c.id} card={c} />)}</>
+}
+
+/** Accesorios con enlaces de afiliado de Amazon; solo aparece si hay un tag configurado. */
+const ACCESSORIES: [string, string, string][] = [
+  ['Fundas', 'Tamaño estándar 66 × 91 mm', 'fundas cartas 66x91'],
+  ['Toploaders', 'Para las cartas más valiosas', 'toploader cartas 35pt'],
+  ['Carpetas', 'Archivadores de 9 bolsillos', 'carpeta cartas 9 bolsillos'],
+  ['Cajas de mazo', 'Para 60–100 cartas con funda', 'deck box cartas'],
+]
+function Accessories({ value }: { value: number }) {
+  if (!MONEY.amazonTag) return null
+  return (
+    <section className="card p-4 space-y-2">
+      <h2 className="font-semibold">Protege tu colección</h2>
+      {value >= 50 && <p className="text-sm muted">Tu colección ya vale una buena cantidad: unas fundas y toploaders la mantienen en perfecto estado.</p>}
+      <div className="grid grid-cols-2 gap-2">
+        {ACCESSORIES.map(([title, sub, q]) => (
+          <a key={title} href={amazonUrl(q)!} target="_blank" rel="noopener noreferrer sponsored" className="chip !rounded-xl !p-3 flex-col !items-start">
+            <b className="text-sm">{title}</b><span className="muted">{sub}</span>
+          </a>
+        ))}
+      </div>
+      <p className="text-xs muted">Enlaces de afiliado de Amazon.</p>
+    </section>
+  )
 }

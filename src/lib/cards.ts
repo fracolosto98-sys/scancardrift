@@ -1,4 +1,5 @@
-import type { Card } from './db'
+import type { Card, PriceRow } from './db'
+import { MONEY } from '../config'
 
 /** "Jinx, Demolitionist (Alternate Art)" → "Jinx, Demolitionist" */
 export const baseName = (c: Pick<Card, 'name'>) => c.name.replace(/\s*\(.*\)\s*$/, '')
@@ -76,10 +77,15 @@ const CM_SETS: Record<string, string> = { OGN: 'Origins', SFD: 'Spiritforged', U
 const cmSlug = (s: string) =>
   s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9\s-]/g, '').trim().replace(/\s+/g, '-')
 
+/** Añade los parámetros de socio de Cardmarket (si hay) a una URL. */
+const withCmParams = (url: string, extra: Record<string, string> = {}) => {
+  const q = new URLSearchParams({ ...extra, ...Object.fromEntries(new URLSearchParams(MONEY.cardmarketParams)) })
+  const qs = q.toString()
+  return qs ? `${url}?${qs}` : url
+}
+
 export function cardmarketSearchUrl(c: Card, foil: boolean): string {
-  const q = new URLSearchParams({ searchString: baseName(c) })
-  if (foil) q.set('isFoil', 'Y')
-  return `${CM}/Search?${q}`
+  return withCmParams(`${CM}/Search`, { searchString: baseName(c), ...(foil ? { isFoil: 'Y' } : {}) })
 }
 
 /** Ficha directa si la carta es "normal" y su set está soportado; si no, búsqueda. */
@@ -87,5 +93,19 @@ export function cardmarketUrl(c: Card, foil: boolean): string {
   const set = CM_SETS[c.set]
   const direct = set && !c.alt && /^\d+$/.test(collectorNo(c)) && !/[()]/.test(c.name) && zoneOf(c) !== 'runes'
   if (!direct) return cardmarketSearchUrl(c, foil)
-  return `${CM}/Singles/${set}/${cmSlug(c.name)}${foil ? '?isFoil=Y' : ''}`
+  return withCmParams(`${CM}/Singles/${set}/${cmSlug(c.name)}`, foil ? { isFoil: 'Y' } : {})
+}
+
+/** Ficha de TCGplayer: con tu enlace de afiliado si está configurado; si no, el que da RiftHunt. */
+export function tcgplayerUrl(c: Card, p: PriceRow | undefined): string | null {
+  if (!c.tcgId) return p?.purchaseUri ?? null
+  const product = `https://www.tcgplayer.com/product/${c.tcgId}`
+  if (MONEY.tcgplayerAffiliate) return `${MONEY.tcgplayerAffiliate}?u=${encodeURIComponent(product)}`
+  return p?.purchaseUri ?? product
+}
+
+/** Búsqueda de accesorios en Amazon con tu tag de afiliado (null si no hay tag). */
+export function amazonUrl(query: string): string | null {
+  if (!MONEY.amazonTag) return null
+  return `https://www.amazon.es/s?${new URLSearchParams({ k: query, tag: MONEY.amazonTag })}`
 }

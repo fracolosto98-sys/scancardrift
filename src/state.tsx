@@ -1,6 +1,7 @@
-import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, makeMoney, type Card, type Currency, type PriceRow } from './lib'
+import { cloudStore } from './lib/cloud'
 
 // ---------- Catálogo en memoria: una sola lectura de IndexedDB para toda la app ----------
 interface Catalog {
@@ -71,3 +72,6 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   )
 }
 export const useToast = () => useContext(ToastCtx)
+
+/** Sesión y estado de la sincronización con la nube. */
+export const useCloud = () => useSyncExternalStore(cloudStore.subscribe, cloudStore.get)

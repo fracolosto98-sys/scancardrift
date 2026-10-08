@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
   addHistory, addOwned, addToDeck, baseName, cardmarketSearchUrl, cardmarketUrl, collectorNo, db, es, finishList,
-  toggleFav, type FinishName,
+  tcgplayerUrl, toggleFav, type FinishName,
 } from '../lib'
 import { useCatalog, useToast } from '../state'
 import CardRow from '../components/CardRow'
@@ -24,7 +24,7 @@ function CardPage({ id }: { id: string }) {
   const price = priceOf(card)
   const fav = useLiveQuery(() => db.favs.get(id), [id])
   const owned = useLiveQuery(() => db.collection.where('cardId').equals(id).toArray(), [id])
-  const decks = useLiveQuery(() => db.decks.toArray(), [])
+  const decks = useLiveQuery(() => db.deckList.toArray(), [])
   const hist = useLiveQuery(() => card?.tcgId ? db.priceHist.where('tcgId').equals(card.tcgId).sortBy('day') : [], [card?.tcgId])
   const [pick, setPick] = useState('')
   const [deckOpen, setDeckOpen] = useState(false)
@@ -50,7 +50,7 @@ function CardPage({ id }: { id: string }) {
     const now = await toggleFav(card!.id)
     toast(now ? 'Añadida a favoritos' : 'Quitada de favoritos')
   }
-  async function onDeck(deckId: number, name: string) {
+  async function onDeck(deckId: string, name: string) {
     const err = await addToDeck(deckId, card!)
     toast(err ?? `Añadida a «${name}»`, err ? undefined : { label: 'Ver mazo', run: () => nav(`/mazos/${deckId}`) })
     if (!err) setDeckOpen(false)
@@ -107,7 +107,7 @@ function CardPage({ id }: { id: string }) {
         </a>
         <div className="flex justify-between text-xs muted">
           <a href={cardmarketSearchUrl(card, foil)} target="_blank" rel="noopener noreferrer" className="underline">¿No es esta? Buscar en Cardmarket</a>
-          {price?.purchaseUri && <a href={price.purchaseUri} target="_blank" rel="noopener noreferrer sponsored" className="underline">Ver en TCGplayer</a>}
+          {tcgplayerUrl(card, price) && <a href={tcgplayerUrl(card, price)!} target="_blank" rel="noopener noreferrer sponsored" className="underline">Ver en TCGplayer</a>}
         </div>
         {price && <p className="text-xs muted">
           Precio de mercado de TCGplayer en USD{currency === 'EUR' && rate ? `, convertido con el tipo del BCE (1 USD = ${rate.toFixed(4)} €)` : ''}.
@@ -128,7 +128,7 @@ function CardPage({ id }: { id: string }) {
       <button className="btn" aria-expanded={deckOpen} onClick={() => setDeckOpen(!deckOpen)}>Añadir a un mazo</button>
       {deckOpen && (
         <div className="card p-3 space-y-2">
-          {decks?.map(d => <button key={d.id} className="btn btn-ghost" onClick={() => onDeck(d.id!, d.name)}>{d.name}</button>)}
+          {decks?.map(d => <button key={d.id} className="btn btn-ghost" onClick={() => onDeck(d.id, d.name)}>{d.name}</button>)}
           {!decks?.length && <p className="text-sm muted">Aún no tienes mazos. Crea uno en la pestaña Mazos.</p>}
         </div>
       )}

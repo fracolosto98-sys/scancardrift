@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
-  addToDeck, baseName, cardPrice, db, deckToText, offIdentity, parseDeckText, removeFromDeck, validateDeck, zoneOf,
+  addToDeck, baseName, cardPrice, createDeck, db, deleteDeck, deckToText, offIdentity, parseDeckText, removeFromDeck, validateDeck, zoneOf,
   type Card, type DeckCard, type DeckItem, type Zone,
 } from '../lib'
 import { useCatalog, useToast } from '../state'
@@ -37,23 +37,19 @@ export default function Decks() {
   const [name, setName] = useState('')
   const [importing, setImporting] = useState(false)
   const [text, setText] = useState('')
-  const decks = useLiveQuery(async () => (await db.decks.toArray()).sort((a, b) => b.createdAt - a.createdAt), [])
-  const rows = useLiveQuery(() => db.deckCards.toArray(), [])
+  const decks = useLiveQuery(async () => (await db.deckList.toArray()).sort((a, b) => b.createdAt - a.createdAt), [])
+  const rows = useLiveQuery(() => db.deckSlots.toArray(), [])
   const list = useMemo(() => decks?.map(d => ({ d, s: summary(rows?.filter(r => r.deckId === d.id) ?? []) })), [decks, rows, summary])
 
   async function create() {
     const n = name.trim(); if (!n) return
-    const id = await db.decks.add({ name: n, createdAt: Date.now() }); setName(''); nav(`/mazos/${id}`)
+    const id = await createDeck(n); setName(''); nav(`/mazos/${id}`)
   }
   async function importDeck() {
     const { found, missing } = parseDeckText(text, cards)
     if (!found.length) return toast('No se ha reconocido ninguna carta.')
     const title = text.match(/^#\s*(.+)$/m)?.[1]?.trim() || 'Mazo importado'
-    const id = await db.transaction('rw', db.decks, db.deckCards, async () => {
-      const id = await db.decks.add({ name: title, createdAt: Date.now() })
-      await db.deckCards.bulkPut(found.map(f => ({ deckId: id, cardId: f.card.id, qty: f.qty })))
-      return id
-    })
+    const id = await createDeck(title, found.map(f => ({ cardId: f.card.id, qty: f.qty })))
     setText(''); setImporting(false)
     toast(missing.length ? `Importado. No se reconocieron ${missing.length} líneas: ${missing.slice(0, 3).join(' · ')}` : 'Mazo importado')
     nav(`/mazos/${id}`)
@@ -118,9 +114,9 @@ export function DeckPage() {
   const toast = useToast()
   const { cards, byId, priceOf, money } = useCatalog()
   const summary = useSummary()
-  const id = Number(useParams().id)
-  const deck = useLiveQuery(async () => (Number.isInteger(id) ? (await db.decks.get(id)) ?? null : null), [id])
-  const rows = useLiveQuery(() => (Number.isInteger(id) ? db.deckCards.where('deckId').equals(id).toArray() : []), [id])
+  const { id = '' } = useParams()
+  const deck = useLiveQuery(async () => (await db.deckList.get(id)) ?? null, [id])
+  const rows = useLiveQuery(() => db.deckSlots.where('deckId').equals(id).toArray(), [id])
   const owned = useLiveQuery(() => db.collection.toArray(), [])
   const s = useMemo(() => rows && summary(rows), [rows, summary])
 
@@ -147,18 +143,11 @@ export function DeckPage() {
   }
   async function remove() {
     if (!confirm(`¿Eliminar el mazo «${deck!.name}»?`)) return
-    await db.transaction('rw', db.decks, db.deckCards, async () => {
-      await db.deckCards.where('deckId').equals(id).delete(); await db.decks.delete(id)
-    })
+    await deleteDeck(id)
     nav('/mazos')
   }
   async function duplicate() {
-    const copy = await db.transaction('rw', db.decks, db.deckCards, async () => {
-      const nid = await db.decks.add({ name: `${deck!.name} (copia)`, createdAt: Date.now() })
-      await db.deckCards.bulkPut(rows!.map(r => ({ ...r, deckId: nid })))
-      return nid
-    })
-    nav(`/mazos/${copy}`)
+    nav(`/mazos/${await createDeck(`${deck!.name} (copia)`, rows!)}`)
   }
   async function share() {
     const text = deckToText(deck!.name, s!.items)
@@ -174,7 +163,7 @@ export function DeckPage() {
     <div className="space-y-4">
       <div className="flex justify-between items-center pt-2 gap-2">
         <h1 className="text-2xl font-bold truncate">{deck.name}</h1>
-        <button className="text-sm muted underline shrink-0" onClick={() => { const n = prompt('Nuevo nombre', deck.name)?.trim(); if (n) db.decks.update(id, { name: n }) }}>Renombrar</button>
+        <button className="text-sm muted underline shrink-0" onClick={() => { const n = prompt('Nuevo nombre', deck.name)?.trim(); if (n) db.deckList.update(id, { name: n }) }}>Renombrar</button>
       </div>
       <div className="card p-4 flex gap-3 items-center">
         {s.legend ? <Link to={`/carta/${s.legend.id}`} className="w-20 shrink-0"><CardImg card={s.legend} w={400} className="w-full rounded-lg" /></Link>
