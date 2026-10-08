@@ -4,6 +4,10 @@
   :root { --paper:#0f1226; --card:#1a1e3a; --line:#2a2f55; --muted:#9aa0c4; --ink:#f2f3ff; --teal:#19c3b1; --gold:#e9b44c; color-scheme:dark; }
 }
 body { background:var(--paper); color:var(--ink); font-family:system-ui,-apple-system,"Segoe UI",sans-serif; -webkit-tap-highlight-color:transparent; }
+/* Con viewport-fit=cover la app se dibuja bajo la barra de estado y el notch: reservar ese espacio. */
+body { padding-top:env(safe-area-inset-top); padding-left:env(safe-area-inset-left); padding-right:env(safe-area-inset-right); }
+/* En móvil, Safari hace zoom (y desplaza la pantalla) al tocar campos con letra de menos de 16 px. */
+@media (pointer: coarse) { input, select, textarea { font-size:16px !important; } }
 .card { background:var(--card); border-radius:20px; box-shadow:0 2px 14px rgba(15,18,38,.08); }
 .btn { display:flex; align-items:center; justify-content:center; gap:.5rem; background:var(--rift); color:#fff; border-radius:16px; padding:14px 18px; font-weight:600; width:100%; text-align:center; }
 .btn:active, .step:active { transform:scale(.98); }
