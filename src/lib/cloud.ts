@@ -92,6 +92,7 @@ function message(e: unknown): string {
   const m = (e as { message?: string; status?: number })
   if (m?.status === 429 || /rate limit|only request this after/i.test(m?.message ?? '')) return 'Demasiados intentos. Espera un minuto y vuelve a probar.'
   if (/expired|invalid/i.test(m?.message ?? '')) return 'El código no es correcto o ha caducado.'
+  if (/error sending/i.test(m?.message ?? '')) return 'No se pudo enviar el email de acceso. Inténtalo más tarde.' // fallo del correo de Supabase, no del usuario
   if (e instanceof TypeError) return 'Sin conexión con el servidor.'
   return m?.message ?? String(e)
 }
